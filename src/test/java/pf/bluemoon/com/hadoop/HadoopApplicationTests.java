@@ -8,12 +8,14 @@ import pf.bluemoon.com.hadoop.client.HadoopClient;
 import pf.bluemoon.com.hadoop.combine.CombineDriver;
 import pf.bluemoon.com.hadoop.combiner.CombinerDriver;
 import pf.bluemoon.com.hadoop.comparable.ComparableDriver;
+import pf.bluemoon.com.hadoop.reducejoin.JoinDriver;
 import pf.bluemoon.com.hadoop.output.LogDriver;
 import pf.bluemoon.com.hadoop.partitition.PartitionDriver;
 import pf.bluemoon.com.hadoop.serializable.FlowDriver;
 import pf.bluemoon.com.hadoop.worldcount.HelloDriver;
 
 import java.io.IOException;
+import java.net.URISyntaxException;
 
 @SpringBootTest
 class HadoopApplicationTests {
@@ -86,5 +88,24 @@ class HadoopApplicationTests {
         };
         LogDriver.drive(paths);
     }
+
+    @Test
+    void joinTest() throws InterruptedException, IOException, ClassNotFoundException {
+        String[] paths = {
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\input\\inputtable",
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\output\\join"
+        };
+        JoinDriver.drive(paths);
+    }
+
+    @Test
+    void join2Test() throws InterruptedException, IOException, ClassNotFoundException, URISyntaxException {
+        String[] paths = {
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\input\\inputtable2",
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\output\\join2"
+        };
+        pf.bluemoon.com.hadoop.mapjoin.JoinDriver.drive(paths);
+    }
+
 
 }
