@@ -8,6 +8,7 @@ import pf.bluemoon.com.hadoop.client.HadoopClient;
 import pf.bluemoon.com.hadoop.combine.CombineDriver;
 import pf.bluemoon.com.hadoop.combiner.CombinerDriver;
 import pf.bluemoon.com.hadoop.comparable.ComparableDriver;
+import pf.bluemoon.com.hadoop.etl.ETLDriver;
 import pf.bluemoon.com.hadoop.reducejoin.JoinDriver;
 import pf.bluemoon.com.hadoop.output.LogDriver;
 import pf.bluemoon.com.hadoop.partitition.PartitionDriver;
@@ -105,6 +106,24 @@ class HadoopApplicationTests {
                 "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\output\\join2"
         };
         pf.bluemoon.com.hadoop.mapjoin.JoinDriver.drive(paths);
+    }
+
+    @Test
+    void etlTest() throws InterruptedException, IOException, ClassNotFoundException, URISyntaxException {
+        String[] paths = {
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\input\\inputlog",
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\output\\etl"
+        };
+        ETLDriver.drive(paths);
+    }
+
+    @Test
+    void zipTest() throws InterruptedException, IOException, ClassNotFoundException, URISyntaxException {
+        String[] paths = {
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\input\\inputlog",
+                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\output\\zip"
+        };
+        pf.bluemoon.com.hadoop.zip.ETLDriver.drive(paths);
     }
 
 
