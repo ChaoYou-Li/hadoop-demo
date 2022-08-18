@@ -1181,5 +1181,404 @@ reduce();
 ```
 ### Join应用
 #### Reduce Join
-Map端的主要工作：为来自不同表或文件的key/value对，打标签以区别不同来源的记录。然后用连接字段作为key，其余部分和新加的标志作为value，最后进行输出。
-    Reduce端的主要工作：在Reduce端以连接字段作为key的分组已经完成，我们只需要在每一个分组当中将那些来源于不同文件的记录（在Map阶段已经打标志）分开，最后进行合并就ok了。
+`Map端`：为来自不同表或文件的key/value，打标签以区别不同来源的记录。然后用`关联字段`作为key，其余部分和新加的标志作为value，最后进行输出。
+`Reduce端`：在Reduce端以`关联字段`作为key的分组已经完成，我们只需要在每一个分组当中将那些来源于不同文件的记录（在Map阶段已经打标志）分开，最后进行合并就ok了。
+##### 需求分析
+通过将关联条件作为Map输出的key，将两表满足Join条件的数据并携带数据所来源的文件信息，发往同一个ReduceTask，在Reduce中进行数据的串联。
+```
+                    order                                       pd                                    result
+        ---------------------------                    ---------------------              ---------------------------------
+       |  id  |  pid   |  amount   |                  |   pid  |   pname    |            |   id  |  pname      |  amount   |
+        ---------------------------           |         ---------------------             --------------------------------- 
+       | 1001 |  01    |    1      |       ———|———    |    01  |   小米     |     ===>   |  1001 |   小米      |     1     |
+        ---------------------------           |         ---------------------             ---------------------------------
+       | 1002 |  02    |    2      |                  |    02  |   华为     |            |  1002 |   华为      |     2     |
+        ---------------------------                    ---------------------              ---------------------------------
+```
+##### 实战
+```java
+/**
+ * Content：设置一张合并后的结果表（order + pd）
+ */
+@Data
+public class TableBean implements Writable, WritableComparable<TableBean> {
+
+    /**
+     * 订单id
+     */
+    private String id = "";
+    /**
+     * 商品id
+     */
+    private String pid = "";
+    /**
+     * 商品数量
+     */
+    private Long amount = 0L;
+    /**
+     * 产品名称
+     */
+    private String proName = "";
+
+    /**
+     * 数据所在表名
+     */
+    private String tabName = "";
+
+    @Override
+    public void write(DataOutput out) throws IOException {
+        out.writeUTF(id);
+        out.writeUTF(pid);
+        out.writeLong(amount);
+        out.writeUTF(proName);
+        out.writeUTF(tabName);
+    }
+
+    @Override
+    public void readFields(DataInput in) throws IOException {
+        this.id = in.readUTF();
+        this.pid = in.readUTF();
+        this.amount = in.readLong();
+        this.proName = in.readUTF();
+        this.tabName = in.readUTF();
+    }
+
+    @Override
+    public String toString() {
+        return id + "\t" + proName + "\t" + amount;
+    }
+
+    @Override
+    public int compareTo(TableBean o) {
+        if (this.amount > o.amount){
+            return 1;
+        } else {
+            return -1;
+        }
+    }
+}
+
+/**
+ * Content：自定义Mapper处理类
+ */
+public class JoinMapper extends Mapper<LongWritable, Text, Text, TableBean> {
+
+    // 表名称(来源文件名)
+    private String fileName = "";
+
+    private Text outKey = new Text();
+    private TableBean outValue = new TableBean();
+
+    /**
+     * 获取文件名称(每个MapTask只会执行一遍)
+     */
+    @Override
+    protected void setup(Context context) {
+        // 获取对应文件名称
+        InputSplit split = context.getInputSplit();
+        FileSplit fileSplit = (FileSplit) split;
+        fileName = fileSplit.getPath().getName();
+    }
+
+    /**
+     * 自定义逻辑的 map 方法
+     */
+    @Override
+    protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+        String line = value.toString();
+        if (null == line || line.length() < 1){
+            return;
+        }
+        String[] worlds = line.split("\t");
+        // 获取对应文件名称
+        if (fileName.contains("order")){
+            /**
+             * 订单表处理逻辑
+             */
+            outKey.set(worlds[worlds.length - 2]);
+            long amount = NumberUtil.isNumber(worlds[worlds.length - 1]) ? Long.parseLong(worlds[worlds.length - 1]) : 0;
+            outValue.setId(worlds[0]);
+            outValue.setAmount(amount);
+            outValue.setPid(worlds[worlds.length - 2]);
+            outValue.setTabName("order");
+        } else {
+            /**
+             * 商品表处理逻辑
+             */
+            outKey.set(worlds[0]);
+            outValue.setProName(worlds[worlds.length - 1]);
+            outValue.setTabName("pd");
+        }
+
+        // map 结果输出
+        context.write(outKey, outValue);
+    }
+}
+
+/**
+ * Content：自定义Reducer处理类
+ */
+public class JoinReducer extends Reducer<Text, TableBean, TableBean, NullWritable> {
+
+    // 自定义逻辑
+    @Override
+    protected void reduce(Text key, Iterable<TableBean> values, Context context) throws IOException, InterruptedException {
+        List<TableBean> orderList = new ArrayList<>();
+        TableBean pdBean = new TableBean();
+        for (TableBean value : values) {
+            // 判断数据来自哪个表
+            if ("order".equals(value.getTabName())){
+                // 创建一个临时TableBean对象接收value
+                TableBean orderBean = new TableBean();
+                BeanUtils.copyProperties(value, orderBean);
+                // 在hadoop语法里面不能直接否则orderList.add(value)，否则orderList里面只有一个元素
+                orderList.add(orderBean);
+            } else {
+                BeanUtils.copyProperties(value, pdBean);
+            }
+        }
+       
+        // 遍历集合orderBeans,替换掉每个orderBean的pid为pname,然后写出
+        for (TableBean order : orderList) {
+            order.setProName(pdBean.getProName());
+            context.write(order, NullWritable.get());
+        }
+    }
+}
+
+/**
+ * Content：reducejoin的驱动类
+ */
+public class JoinDriver {
+    public static void drive(String[] args) throws IOException {
+        // 初始化配置参数
+        Configuration config = new Configuration();
+        Job job = Job.getInstance(config);
+
+        // 关联Driver的jar类
+        job.setJarByClass(JoinDriver.class);
+
+        // 关联Mapper/Reducer实现类
+        job.setMapperClass(JoinMapper.class);
+        job.setReducerClass(JoinReducer.class);
+
+        // 设置Mapper的输出类型
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(TableBean.class);
+
+        // 设置最后输出类型
+        job.setOutputKeyClass(TableBean.class);
+        job.setOutputValueClass(NullWritable.class);
+
+        // 设置输入和输出路径
+        FileInputFormat.setInputPaths(job, new Path(args[0]));
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+        // 7、提交
+        boolean completion = job.waitForCompletion(true);
+        System.exit(completion ? 0 : 1);
+    }
+}
+```
+##### 总结
+缺点：这种方式中，合并的操作是在Reduce阶段完成，`Reduce端的处理压力太大`，Map节点的运算负载则很低，`资源利用率不高`，且在Reduce阶段极易产生数据倾斜。
+#### Mapper Join
+##### 适用场景
+Map Join 合适处理大小表关联的情况，比如：A表数据量1G，B表数据量10M，这种情况适用Map Join处理比较有优势。
+##### 优点
+思考：在Reduce端处理过多的表，非常容易产生数据倾斜。怎么办？
+在Map端缓存多张小表，提前处理业务逻辑，这样增加Map端业务，减少Reduce端数据的压力，尽可能的减少数据倾斜。
+##### DistributedCache
+- 在Mapper的setup阶段，将文件读取到缓存集合中。
+- 在Driver驱动类中加载缓存。
+##### 实战
+```java
+/**
+ * TableBean 如上
+ */
+
+/**
+ * Content：自定义Mapper处理类
+ */
+public class JoinMapper extends Mapper<LongWritable, Text, TableBean, NullWritable> {
+
+    private TableBean outKey = new TableBean();
+
+    private Map<String, String> cache = new HashMap<>();
+
+    /**
+     * 获取缓存文件数据，并把数据读出来存放到一个map中
+     */
+    @Override
+    protected void setup(Context context) throws IOException {
+        // 从上下文中提取缓存文件路径
+        URI[] cacheFiles = context.getCacheFiles();
+        // 从上下文中的配置信息初始化一个文件系统对象
+        FileSystem fs = FileSystem.get(context.getConfiguration());
+        // 初始化一个输入流
+        FSDataInputStream stream = fs.open(new Path(cacheFiles[0]));
+        // 初始化一个读缓冲区
+        BufferedReader reader = new BufferedReader(new InputStreamReader(stream, "UTF-8"));
+        String line;
+        // 遍历缓冲区内的数据
+        while (null != (line = reader.readLine())){
+            if (line.length() < 1){
+                continue;
+            }
+            String[] worlds = line.split("\t");
+            // 从缓冲区中把数据写入到缓存当中
+            cache.put(worlds[0], worlds[worlds.length - 1]);
+        }
+    }
+
+    @Override
+    protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+        String line = value.toString();
+        if (null == line || line.length() < 1){
+            return;
+        }
+        String[] worlds = line.split("\t");
+        /**
+         * 订单表处理逻辑
+         */
+        long amount = NumberUtil.isNumber(worlds[worlds.length - 1]) ? Long.parseLong(worlds[worlds.length - 1]) : 0;
+        outKey.setId(worlds[0]);
+        outKey.setAmount(amount);
+        outKey.setPid(worlds[worlds.length - 2]);
+        // 从缓存中提取产品名称
+        outKey.setProName(cache.get(outKey.getPid()));
+        outKey.setTabName("order");
+
+        // 输出
+        context.write(outKey, NullWritable.get());
+    }
+}
+
+/**
+ * Content：map join 驱动类
+ */
+public class JoinDriver {
+    public static void drive(String[] args) throws IOException, URISyntaxException {
+        // 初始化配置参数
+        Configuration config = new Configuration();
+        Job job = Job.getInstance(config);
+
+        // 关联Driver的jar类
+        job.setJarByClass(JoinDriver.class);
+
+        // 关联Mapper/Reducer实现类
+        job.setMapperClass(JoinMapper.class);
+
+        // 设置Mapper的输出类型
+        job.setMapOutputKeyClass(TableBean.class);
+        job.setMapOutputValueClass(NullWritable.class);
+
+        // 设置最后输出类型
+        job.setOutputKeyClass(TableBean.class);
+        job.setOutputValueClass(NullWritable.class);
+
+        // 设置取消reduce阶段
+        job.setNumReduceTasks(0);
+
+        // 设置缓存数据
+        job.addCacheFile(new URI("file:///C:/workspace/idea/springboot/hadoop-demo/src/main/resources/input/tablecache/pd.txt"));
+
+        // 设置输入和输出路径
+        FileInputFormat.setInputPaths(job, new Path(args[0]));
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+        // 7、提交
+        boolean completion = job.waitForCompletion(true);
+        System.exit(completion ? 0 : 1);
+    }
+}
+```
+### ETL清洗
+ETL，是英文Extract-Transform-Load的缩写，用来描述将数据从来源端经过抽取（Extract）、转换（Transform）、加载（Load）至目的端的过程。ETL一词较常用在数据仓库，但其对象并不限于数据仓库
+在运行核心业务MapReduce程序之前，往往要先对数据进行清洗，清理掉不符合用户要求的数据。`清理的过程往往只需要运行Mapper程序，不需要运行Reduce程序`。
+#### 需求分析
+需要在Map阶段对输入的数据根据规则进行过滤清洗。去除日志中字段个数小于等于15的日志。
+#### 实战
+```java
+/**
+ * Content：etl的自定义Mapper处理类
+ */
+public class ETLMapper extends Mapper<LongWritable, Text, Text, NullWritable> {
+
+    @Override
+    protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+        // 取出行数据
+        String line = value.toString();
+
+        boolean pass = true;
+
+        // etl清洗逻辑：筛选出每行字段长度都大于15
+        String[] worlds = line.split(" ");
+        if (worlds.length < 15){
+            pass = false;
+        }
+        if (!pass){
+            // 不符合条件就退出
+            return;
+        }
+        
+        // 符合需求的数据输出
+        context.write(value, NullWritable.get());
+    }
+}
+
+/**
+ * Content：etl的驱动类
+ */
+public class ETLDriver {
+    public static void drive(String[] args) throws IOException, ClassNotFoundException, InterruptedException {
+        Configuration config = new Configuration();
+        Job job = Job.getInstance(config);
+
+        job.setJarByClass(ETLDriver.class);
+
+        // 只需要关联 Mapper 即可
+        job.setMapperClass(ETLMapper.class);
+
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(NullWritable.class);
+
+        job.setOutputKeyClass(Text.class);
+        job.setOutputValueClass(NullWritable.class);
+
+        job.setNumReduceTasks(0);
+
+        FileInputFormat.setInputPaths(job, new Path(args[0]));
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+        boolean result = job.waitForCompletion(true);
+        System.exit(result ? 1 : 0);
+    }
+}
+```
+### MapReduce 总结
+#### 输入数据接口：InputFormat
+- 默认使用的实现类是：TextInputFormat
+- TextInputFormat的功能逻辑是：一次读一行文本，然后将该行的`起始偏移量`作为key，`行内容`作为value返回。
+- CombineTextInputFormat可以把多个小文件合并成一个切片处理，提高处理效率。
+#### 逻辑处理接口：Mapper 
+用户根据业务需求实现其中三个方法： setup()  ->  map()  ->  cleanup ()
+
+`setup`：一般用于初始化一些资源
+`map`：用户自定义处理逻辑
+`cleanup`：一般用于关闭资源 
+#### Partitioner分区
+- 有默认实现 HashPartitioner，逻辑是根据key的哈希值和numReduces来返回一个分区号；默认逻辑：`key.hashCode() & Integer.MAXVALUE % numReduces`
+- 如果业务上有特别的需求，可以自定义分区。需要`继承`Partitioner抽象类，并`实现`getPartition()方法
+#### Comparable排序
+- 当我们用自定义的对象作为key来输出时，就必须要实现WritableComparable接口，重写其中的compareTo()方法。
+- 部分排序：对最终输出的每一个`文件`进行内部排序。
+- 全排序：对所有数据进行排序，通常只有一个`Reduce`。
+- 二次排序：排序的条件有两个。
+#### Combiner合并
+Combiner合并可以提高程序执行效率，减少IO传输。但是使用时必须不能影响原有的业务处理结果。
+#### 逻辑处理接口：Reducer
+用户根据业务需求实现其中三个方法： setup()  ->  reduce()  ->  cleanup ()
+#### 输出数据接口：OutputFormat
+- 默认实现类是TextOutputFormat，功能逻辑是：将每一个KV对，向目标文本文件输出一行。
+- 用户还可以自定义OutputFormat。需要自定义OutputFormat和自定义RecordWriter类

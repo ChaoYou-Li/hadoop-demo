@@ -1,4 +1,4 @@
-package pf.bluemoon.com.hadoop.zip;
+package pf.bluemoon.com.hadoop.reducezip;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -8,18 +8,20 @@ import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import pf.bluemoon.com.hadoop.mapzip.ETLDriver;
+import pf.bluemoon.com.hadoop.mapzip.ETLMapper;
 
 import javax.xml.soap.Text;
 import java.io.IOException;
 
 /**
- * Author: chaoyou
- * Email：1277618785@qq.com
- * CSDN：https://blog.csdn.net/qq_41910568
- * Date: 21:09 2022/8/15
- * Content：压缩实战
+ * @Author chaoyou
+ * @Date Create in 14:15 2022/8/17
+ * @Modified by
+ * @Version 1.0.0
+ * @Description
  */
-public class ETLDriver {
+public class ZIPDriver {
     public static void drive(String[] args) throws IOException, ClassNotFoundException, InterruptedException {
         // 初始化配置参数
         Configuration config = new Configuration();

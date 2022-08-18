@@ -38,16 +38,22 @@ public class JoinMapper extends Mapper<LongWritable, Text, TableBean, NullWritab
      */
     @Override
     protected void setup(Context context) throws IOException {
+        // 从上下文中提取缓存文件路径
         URI[] cacheFiles = context.getCacheFiles();
+        // 从上下文中的配置信息初始化一个文件系统对象
         FileSystem fs = FileSystem.get(context.getConfiguration());
+        // 初始化一个输入流
         FSDataInputStream stream = fs.open(new Path(cacheFiles[0]));
+        // 初始化一个读缓冲区
         BufferedReader reader = new BufferedReader(new InputStreamReader(stream, "UTF-8"));
         String line;
+        // 遍历缓冲区内的数据
         while (null != (line = reader.readLine())){
             if (line.length() < 1){
                 continue;
             }
             String[] worlds = line.split("\t");
+            // 从缓冲区中把数据写入到缓存当中
             cache.put(worlds[0], worlds[worlds.length - 1]);
         }
     }
@@ -66,6 +72,7 @@ public class JoinMapper extends Mapper<LongWritable, Text, TableBean, NullWritab
         outKey.setId(worlds[0]);
         outKey.setAmount(amount);
         outKey.setPid(worlds[worlds.length - 2]);
+        // 从缓存中提取产品名称
         outKey.setProName(cache.get(outKey.getPid()));
         outKey.setTabName("order");
 
