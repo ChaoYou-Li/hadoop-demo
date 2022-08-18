@@ -120,10 +120,10 @@ class HadoopApplicationTests {
     @Test
     void zipTest() throws InterruptedException, IOException, ClassNotFoundException, URISyntaxException {
         String[] paths = {
-                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\input\\inputlog",
-                "C:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\output\\zip"
+                "D:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\input\\inputlog",
+                "D:\\workspace\\idea\\springboot\\hadoop-demo\\src\\main\\resources\\output\\zip"
         };
-        pf.bluemoon.com.hadoop.zip.ETLDriver.drive(paths);
+        pf.bluemoon.com.hadoop.mapzip.ETLDriver.drive(paths);
     }
 
 
